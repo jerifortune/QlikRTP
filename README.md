@@ -33,24 +33,24 @@ Note: LIB parameters must start with a 'lib://' and end with a slash.
 
 # Installation
 Installation assumptions:
-1. That you have a data connection defined for a scripts library.  You will need to $(include) these scripts in an app.
+1. That you have a data connection defined for a scripts library.  The app uses $(include).
 2. That you have a data connection defined for reading and writing QVDs.
 
 Steps:
 1. Download the repository zip file
 2. Unzip it in your Scripts folder (or a sub-folder of your Scripts folder).
 
-Note: the SampleApp is not required, but shows you how you can invoke the scripts in your app.  You can, of course, just use the SampleApp as your RTP Generator.
-
-# Steps
-1. Include RTP_Main.qvs 
-2. Set values for the above 8 variables
-3. Call the RTP_Generate() procedure.  This will create 2 generic RTP tables (QVDs) to be used by subsequent steps.
-4. Call the RTP_Replicate() procedure for your event.  This will create 4 event-specific RTP tables (QVDs).
+# Usage Steps
+1. Open the RTP_Generator app in Qlik Sense.  Open the data load script editor.
+2. Set values for the above 8 variables and for the two parameters in the RTP.Replicate procedure call.
+3. Run the Load.
+4. Check your output data folder to see if the RTP QVDs have been created.
 
 Subsequent Steps
-5. Transform your fact table.  Create a YearMonth column that is derived from the event (date) you want to use.
-6. Load your final app.  Use the transformed fact table and the 4 event-specific RTP tables.  The joins between the fact table and the RTP tables should happen automatically.
+4. Transform your fact table.  Create a YearMonth column that is derived from the event (date) you want to use.
+5. Load your final app.  Use the transformed fact table and the 4 event-specific RTP tables.  The joins between the fact table and the RTP tables should happen automatically.
+
+Note: RTP_Generator.qvf is not specifically required.  You can include these scripts in your scripts or apps and just call the RTP.Generate and RTP.Replicate procedures.
 
 # Credit 
 The original idea for this script library came from the following Qlik Community forum post:
