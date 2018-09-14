@@ -1,0 +1,86 @@
+/*********************************************************************************************
+***   Relative Time Periods (RTP) - Monthly
+**********************************************************************************************
+This script will construct a number of tables that will enable RTP in any Qlik application.
+	RTP_Type	- Contains the relative time period types (ex. CM, PM, CMPY, YTD, R3M, etc.)
+	RTP_Map		- N:N mapping table that sits between a fact table and the Month Dim
+	
+Assumptions:
+	1. That the client has a date dimension that just contains months -- the "Month Dim".
+	2. The table should have a primary key (PK) that is unique for each month.
+	3. The PK does not have to be a sequential integer.  
+		A six digit number (YYYYMM) or a string ('YYYY-MM') are acceptable.
+	4. The Month Dim has been exported to a QVD file.
+
+Required Parameters:
+	RTP.SCRIPTLIB 						- lib path where RTP scripts and definitions file are located.
+	RTP.SOURCELIB 						- lib path where the Month Dim QVD resides.
+	RTP.TARGETLIB 						- lib path where RTP tables will be written.
+	RTP.DEFS.FILENAME					- Name of the RTP definitions file (csv).
+	RTP.MONTH_DIM.TABLE_NAME 			- the name of the table which contains the Month Dim.
+	RTP.MONTH_DIM.PK_FIELD_NAME 		- the name of the primary key field on that table.
+	RTP.MONTH_DIM.MONTH_NUM_FIELD_NAME 	- The name of the field which contains the month number (1-12).
+	RTP.DEBUG							- -1 (TRUE) or 0 (FALSE)
+	
+Note: LIB parameters must start with a 'lib://' and end with a slash.
+*********************************************************************************************/
+
+/*****************************************************************
+***   TRACE
+*****************************************************************/
+TRACE *****  [RTP_Main.qvs] Included  *****;
+TRACE ***  Expected Variables  ***;
+TRACE RTP.MONTH_DIM.TABLE_NAME = $(RTP.MONTH_DIM.TABLE_NAME);
+TRACE RTP.MONTH_DIM.PK_FIELD_NAME = $(RTP.MONTH_DIM.PK_FIELD_NAME);
+TRACE RTP.MONTH_DIM.MONTH_NUM_FIELD_NAME = $(RTP.MONTH_DIM.MONTH_NUM_FIELD_NAME);
+TRACE RTP.SCRIPTLIB = $(RTP.SCRIPTLIB);
+TRACE RTP.SOURCELIB = $(RTP.SOURCELIB);
+TRACE RTP.TARGETLIB = $(RTP.TARGETLIB);
+TRACE RTP.DEBUG = $(RTP.DEBUG);
+
+/*****************************************************************
+***   Includes
+*****************************************************************/
+$(Include=[$(RTP.SCRIPTLIB)RTP_Generator.qvs]);
+$(Include=[$(RTP.SCRIPTLIB)RTP_Replicator.qvs]);
+
+/**********************************************************************
+***   BEGIN
+**********************************************************************/
+Sub RTP.Generate
+	//   Load the parameters from RTP_Params.csv
+	Call RTP.LoadParameters;
+
+	//   Load the Month Dim
+	Call RTP.LoadMonthDim;
+
+	//   Create the Cartesian Product of the Month Dim
+	Call RTP.CreateMonthCP;
+
+	//Initialize the RTP_Map table
+	Call RTP.InitializeMap;
+
+	/**********************************************************************
+	***   MAIN LOOP: Populate the RTP_Map table
+	**********************************************************************/
+	For i = 0 to iNumParamRows -1
+		//Read from the RTP_Type table
+		sCode = 		Peek( 'rtp_code', i, 'RTP_Type');
+		iNumPeriods = 	Peek( 'num_periods', i, 'RTP_Type');
+		iOffset = 		Peek( 'offset', i, 'RTP_Type');
+		
+		Call RTP.CreateMaps( sCode, iNumPeriods, iOffset);
+	Next
+
+	/**********************************************************************
+	***   CLEANUP
+	**********************************************************************/
+	Call RTP.DropMonthCP;
+
+	If Not RTP.DEBUG Then 
+		// Regular procedures.  Store and Drop tables.
+		Call RTP.StoreDrop( 'RTP_Map');
+		Call RTP.StoreDrop( 'RTP_Type');
+		Call RTP.DropMonthDim;
+	End If 
+End Sub

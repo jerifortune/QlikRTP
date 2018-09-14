@@ -1,0 +1,190 @@
+/**********************************************************************
+***   Relative Time Periods (RTP)
+***********************************************************************
+RTP sub procedure declarations
+**********************************************************************/
+TRACE *****  [RTP/rtp_procs.qvs] Included  *****;
+
+
+/*****************************************************************
+***   Load RTP Parameters
+******************************************************************
+Load the RTP_Type table from the RTP_Params.csv
+*****************************************************************/
+Sub RTP.LoadParameters
+	//Prefix the parameter filename with the script library
+	sDefsFilename = RTP.SCRIPTLIB & RTP.DEFS.FILENAME;
+
+	RTP_Type:
+	LOAD
+		rtp_code
+		,rtp_name
+		,num_periods
+		,offset
+	FROM
+		[$(sDefsFilename)]
+		(txt, codepage is 1252, embedded labels, delimiter is ',', msq);
+	;
+
+	iNumParamRows = NoOfRows('RTP_Type');
+End Sub
+/*********************************************************************/
+
+/*****************************************************************
+***   Load the Month Dim
+*****************************************************************/
+Sub RTP.LoadMonthDim
+	sMonthDimFilename = [RTP.SOURCELIB] & [RTP.MONTH_DIM.TABLE_NAME] & '.QVD';
+
+	//Load the Month dimension from a QVD
+	//Load to a temporary table first (can't use ORDER BY on file load)
+	Temp_MonthDim:
+	LOAD
+		*
+	FROM
+		[$(sMonthDimFilename)](qvd)
+	;
+
+	/*****************************************************************
+	***   Sort and Create a Surrogate Key (SK)
+	*****************************************************************/
+	// First we need to establish a surrogate key (SK).  
+	// The SK must be unique and sequentially numbered.
+	// We will be using the SK to find months relative to one another.
+	// For instance the SK for '2018-03' might be 27.  If we want to find the same period last year, 
+	// we would subtract 12 from the SK (27-12=15).  The resulting SK should yield '2017-03'.
+	MonthDim:
+	LOAD
+		*
+		,AutoNumber( $(RTP.MONTH_DIM.PK_FIELD_NAME)) AS month_sk		// Surrogate Key
+	RESIDENT 
+		Temp_MonthDim
+	ORDER BY 
+		$(RTP.MONTH_DIM.PK_FIELD_NAME)
+	;
+
+	//Rowcount
+	iNumMonths = NoOfRows('MonthDim');
+	TRACE Inserted $(iNumMonths) into MonthDim;
+
+	DROP TABLE Temp_MonthDim;
+	
+	//Rename fields for consistency
+	// RENAME FIELD $(RTP.MONTH_DIM.PK_FIELD_NAME) 		TO month_pk;
+	// RENAME FIELD $(RTP.MONTH_DIM.MONTH_NUM_FIELD_NAME) 	TO month_num;
+	
+End Sub
+/**********************************************************************/
+
+/**********************************************************************
+***   Cartesian Product
+***********************************************************************
+Create a cross join (full outer join) of all months (Cartesian product).  
+In other words, map every month to every other month (including itself).
+If the Month dim has 12 rows, then the Cartesian product table will have 144 rows.
+We will be using this temporary table for populating the RTP_Map table.
+**********************************************************************/
+Sub RTP.CreateMonthCP
+	Temp_MonthCP:
+	LOAD 
+		$(RTP.MONTH_DIM.PK_FIELD_NAME)			AS anchor_month_pk
+		,month_sk 								AS anchor_month_sk
+		,$(RTP.MONTH_DIM.MONTH_NUM_FIELD_NAME)	AS anchor_month_num
+	RESIDENT 
+		MonthDim;
+	JOIN LOAD
+		$(RTP.MONTH_DIM.PK_FIELD_NAME)			AS result_month_pk
+		,month_sk 								AS result_month_sk
+		,$(RTP.MONTH_DIM.MONTH_NUM_FIELD_NAME)	AS result_month_num
+	RESIDENT 
+		MonthDim
+	;
+
+	//DROP TABLE MonthDim;
+
+	iNumRows = NoOfRows('Temp_MonthCP');
+	TRACE There are $(iNumRows) in Temp_MonthCP;
+	/****************************************************************/
+End Sub
+
+
+/**********************************************************************
+***   Initialize RTP_Map
+***********************************************************************
+Create an empty RTP_Map table (so we can use CONCATENATE in the procs)
+**********************************************************************/
+Sub RTP.InitializeMap
+	RTP_Map:
+	LOAD * 
+	INLINE [$(RTP.MONTH_DIM.PK_FIELD_NAME),rtp_code,fact_month_fk
+	];
+End Sub 
+
+
+Sub RTP.DropMonthCP
+	DROP TABLE Temp_MonthCP;
+End Sub
+
+Sub RTP.DropMonthDim
+	DROP TABLE MonthDim;
+End Sub
+
+Sub RTP.CreateMaps( sRTP_Type, iNumPeriods, iOffset)
+
+	Switch iNumPeriods
+		Case -1  // YTD
+		
+			CONCATENATE (RTP_Map) 
+			LOAD
+				anchor_month_pk		AS $(RTP.MONTH_DIM.PK_FIELD_NAME)
+				,result_month_pk 	AS fact_month_fk
+				,'$(sRTP_Type)' 	AS rtp_code
+			RESIDENT 
+				Temp_MonthCP
+			WHERE
+				result_month_sk <= (anchor_month_sk + $(iOffset))
+				AND result_month_sk >= (anchor_month_sk + $(iOffset)) - anchor_month_num + 1
+			;
+
+		Case -3  // QTD
+			CONCATENATE (RTP_Map) 
+			LOAD
+				anchor_month_pk		AS $(RTP.MONTH_DIM.PK_FIELD_NAME)
+				,result_month_pk 	AS fact_month_fk
+				,'$(sRTP_Type)' 	AS rtp_code
+			RESIDENT 
+				Temp_MonthCP
+			WHERE
+				result_month_sk <= anchor_month_sk + $(iOffset)
+				AND result_month_sk >= anchor_month_sk + $(iOffset) - Mod( anchor_month_num +2, 3) 
+			;
+		Default
+			CONCATENATE (RTP_Map) 
+			LOAD
+				anchor_month_pk		AS $(RTP.MONTH_DIM.PK_FIELD_NAME)
+				,result_month_pk 	AS fact_month_fk
+				,'$(sRTP_Type)' 	AS rtp_code
+			RESIDENT 
+				Temp_MonthCP
+			WHERE
+				result_month_sk <= (anchor_month_sk + $(iOffset))
+				AND result_month_sk >= (anchor_month_sk + $(iOffset) - $(iNumPeriods) + 1)
+			;
+	End Switch
+End Sub
+
+// Store & Drop RTP_Type
+Sub RTP.StoreDrop( sTargetTable)
+	If sTargetTable='RTP_Type' Then 
+		// (Get rid of the parameter fields first.  Not needed in the export.)
+		DROP FIELDS num_periods, offset;
+	End If
+
+	//Store
+	// sTargetTable = 'RTP_Type';
+	sTargetFilename = RTP.TARGETLIB & sTargetTable & '.qvd';
+	STORE * FROM $(sTargetTable) INTO '$(sTargetFilename)';
+
+	//Drop
+	DROP TABLE $(sTargetTable);
+End Sub

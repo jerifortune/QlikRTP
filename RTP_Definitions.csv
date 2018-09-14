@@ -1,0 +1,14 @@
+rtp_code,rtp_name,num_periods,offset
+CM,"Current Month",1,0
+PM,"Previous Month",1,-1
+CMPY,"Current Month, Previous Year",1,-12
+PMPY,"Previous Month, Previous Year",1,-13
+R3M,"Rolling 3 Months",3,0
+PR3M,"Previous Rolling 3 Months",3,-3
+R3MPY,"Rolling 3 Months (PY)",3,-12
+R12M,"Rolling 12 Months",12,0
+R12MPY,"Rolling 12 Months (PY)",12,-12
+QTD,"Quarter-to-Date",-3,0
+QTDPY,"Quarter-to-Date (PY)",-3,-12
+YTD,"Year-to-Date",-1,0
+YTDPY,"Year-to-Date (PY)",-1,-12

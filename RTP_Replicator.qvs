@@ -1,0 +1,133 @@
+TRACE *****  [rtp_replicate.qss] Included   ******;
+
+/**********************************************************************
+***   Duplicate RTP Tables
+******************************************************************
+Given an event name, instantiate a set of RTP tables.
+For example, assume we have a fact table with OrderDate.  The adjective that
+distinguishes this date from other dates is "Order".  There may be other dates
+on the fact table such as ShipDate.  We want to make a set of RTP tables which are 
+based on the MonthDim and created for the OrderMonth.
+	RTP_Map --> OrderMonth.RTP_Map
+	RTP_Type --> OrderMonth.RTP_Type
+	MonthDim --> OrderMonth.Anchor		(just the YearMonth column for anchor month lists)
+	MonthDim --> OrderMonth				(full Month Dim)
+
+This script requires the global RTP variables.  See RTP_Main.qvs for details.
+**********************************************************************/
+
+Sub DropTables
+	iNumTables = NoOfTables();
+
+	For i=1 to $(iNumTables)
+		sTableName = TableName(0);
+		DROP TABLE [$(sTableName)];
+	Next
+End Sub
+
+Sub InitTableList( sFullEventName)
+	TableList:
+	LOAD * INLINE [SourceTable,TargetTable
+		RTP_Map,$(sFullEventName).RTP_Map
+		RTP_Type,$(sFullEventName).RTP_Type
+		$(RTP.MONTH_DIM.TABLE_NAME),$(sFullEventName).Anchor
+		$(RTP.MONTH_DIM.TABLE_NAME),$(sFullEventName)
+	];
+End Sub
+
+/**********************************************************************
+***   Duplicate RTP Tables
+***********************************************************************
+Parameters:
+	- sEvent is usually a descriptor which distinguishes one date from another (i.e. Order vs. Ship date).
+	- sTimeGran is usually 'Month', 'Week', or abbreviations.
+**********************************************************************/
+Sub RTP.Replicate( sEvent, sTimeGran)
+
+	sFullEventName = sEvent & sTimeGran;
+
+	Call DropTables;
+	
+	Call InitTableList( sFullEventName);
+
+	For i=0 to NoOfRows( 'TableList') -1
+		sSourceTableName = Peek( 'SourceTable', i, 'TableList');
+		sTargetTableName = Peek( 'TargetTable', i, 'TableList');
+	
+		sSourceFilename = RTP.TARGETLIB & sSourceTableName & '.qvd';
+		sTargetFilename = RTP.TARGETLIB & sTargetTableName & '.qvd';
+		
+		QUALIFY *;
+		UNQUALIFY $(RTP.MONTH_DIM.PK_FIELD_NAME), rtp_code, rtp_name, fact_month_fk;
+		
+		If Index( sTargetTableName, 'Anchor')>0 Then 
+			// If this is the anchor 
+			$(sTargetTableName):
+			LOAD $(RTP.MONTH_DIM.PK_FIELD_NAME)
+			FROM [$(sSourceFilename)](qvd);
+		Else
+			// Load
+			$(sTargetTableName):
+			LOAD *
+			FROM [$(sSourceFilename)](qvd);
+		End If 
+		
+		// Field Renames
+		If sSourceTableName='RTP_Map' Then 
+			/*****************************************************************
+			OrderMonth.rtp_code
+			OrderMonth.AnchorYearMonth	(to Dim)
+			OrderYearMonth				(to Fact)
+			*****************************************************************/
+			RENAME FIELD "rtp_code" TO "$(sDateName).rtp_code";
+			RENAME FIELD "$(RTP.MONTH_DIM.PK_FIELD_NAME)" TO "$(sDateName).Anchor$(RTP.MONTH_DIM.PK_FIELD_NAME)";
+			RENAME FIELD "fact_month_fk" TO "$(sEvent)$(RTP.MONTH_DIM.PK_FIELD_NAME)";
+			
+		ElseIf sSourceTableName='RTP_Type' Then 
+			/*****************************************************************
+			OrderMonth.rtp_code
+			OrderMonth.rtp_name
+			*****************************************************************/
+			RENAME FIELD "rtp_code" TO "$(sDateName).rtp_code";
+			RENAME FIELD "rtp_name" TO "$(sDateName).rtp_name";
+			
+		ElseIf Index( sTargetTableName, 'Anchor')>0 Then 
+			/*****************************************************************
+			OrderMonth.AnchorYearMonth
+			*****************************************************************/
+			RENAME FIELD "$(RTP.MONTH_DIM.PK_FIELD_NAME)" TO "$(sDateName).Anchor$(RTP.MONTH_DIM.PK_FIELD_NAME)";
+		ElseIf sTargetTableName=sFullEventName Then 
+			/*****************************************************************
+			OrderYearMonth
+			*****************************************************************/
+			RENAME FIELD "$(RTP.MONTH_DIM.PK_FIELD_NAME)" TO "$(sEvent)$(RTP.MONTH_DIM.PK_FIELD_NAME)";
+		End If 
+
+		// Store & Drop
+		STORE * FROM $(sTargetTableName) INTO '$(sTargetFilename)';
+		DROP TABLE $(sTargetTableName);
+	Next
+	
+	If RTP.DEBUG Then 
+		Call LoadTargetTables;
+	End If 
+	DROP TABLE TableList;
+End Sub
+
+Sub LoadTargetTables
+	TRACE Loading tables;
+	
+	UNQUALIFY *;
+	
+	For j = 0 to NoOfRows( 'TableList') - 1
+		sTargetTableName = Peek( 'TargetTable', j, 'TableList');
+		
+		TRACE $(j):$(sTargetTableName);
+		
+		sSourceFilename = RTP.TARGETLIB & sTargetTableName & '.qvd';
+		
+		$(sTargetTableName):
+		LOAD * 
+		FROM [$(sSourceFilename)](qvd);
+	Next
+End Sub 
